@@ -124,16 +124,20 @@ if st.button("Login"):
 # Cek status login
 if st.session_state.get("logged_in", False):
     st.write(f"Selamat datang, {st.session_state['username']}! Anda telah login.")
-    if st.button("Logout"):
-        st.session_state["logged_in"] = False
-        st.session_state["username"] = None
-        st.rerun()
 else:
     st.write("Silakan login untuk mengakses aplikasi.")
 
 def main_app():
     """Aplikasi utama setelah login."""
     st.title("Konversi Faktur Pajak PDF To Excel")
+    
+    # Tombol logout hanya tampil jika sudah login
+    if st.session_state.get("logged_in", False):
+        if st.button("Logout"):
+            st.session_state["logged_in"] = False
+            st.session_state["username"] = None
+            st.rerun()  # Logout dan rerun untuk menampilkan halaman login
+    
     uploaded_files = st.file_uploader("Upload Faktur Pajak (PDF, bisa lebih dari satu)", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_files:
@@ -174,6 +178,6 @@ if __name__ == "__main__":
         st.session_state["logged_in"] = False
     
     if not st.session_state["logged_in"]:
-        login_page()
+        login_page()  # Tampilkan form login hanya jika belum login
     else:
-        main_app()
+        main_app()  # Tampilkan aplikasi utama setelah login
