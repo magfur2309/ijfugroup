@@ -3,6 +3,7 @@ import pandas as pd
 import pdfplumber
 import io
 import re
+import hashlib
 
 def find_invoice_date(pdf_file):
     """Mencari tanggal faktur dalam PDF, mulai dari halaman pertama."""
@@ -95,16 +96,40 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur, expected_item_count):
 
 def login_page():
     """Menampilkan halaman login."""
-    st.title("Login Konversi Faktur Pajak")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
     
-    if st.button("Login"):
-        if username == "admin" and password == "password123":  # Ganti dengan metode autentikasi yang lebih aman
-            st.session_state["logged_in"] = True
-            st.rerun()
-        else:
-            st.error("Username atau password salah")
+# Simulasi database pengguna dengan password yang di-hash
+users = {
+    "user1": hashlib.sha256("ijfugroup1".encode()).hexdigest(),
+    "user2": hashlib.sha256("ijfugroup2".encode()).hexdigest(),
+    "user3": hashlib.sha256("ijfugroup3".encode()).hexdigest(),
+    "user4": hashlib.sha256("ijfugroup4".encode()).hexdigest()
+}
+
+st.title("Login Konversi Faktur Pajak")
+
+# Input username dan password
+username = st.text_input("Username", placeholder="Masukkan username Anda")
+password = st.text_input("Password", type="password", placeholder="Masukkan password Anda")
+
+# Tombol login
+if st.button("Login"):
+    if username in users and hashlib.sha256(password.encode()).hexdigest() == users[username]:
+        st.session_state["logged_in"] = True
+        st.session_state["username"] = username  # Simpan username di session state
+        st.success("Login berhasil!")
+        st.rerun()
+    else:
+        st.error("Username atau password salah")
+
+# Cek status login
+if st.session_state.get("logged_in", False):
+    st.write(f"Selamat datang, {st.session_state['username']}! Anda telah login.")
+    if st.button("Logout"):
+        st.session_state["logged_in"] = False
+        st.session_state["username"] = None
+        st.rerun()
+else:
+    st.write("Silakan login untuk mengakses aplikasi.")
 
 def main_app():
     """Aplikasi utama setelah login."""
