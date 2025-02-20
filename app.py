@@ -89,7 +89,7 @@ def login_page():
         "user3": hashlib.sha256("ijfugroup3".encode()).hexdigest(),
         "user4": hashlib.sha256("ijfugroup4".encode()).hexdigest()
     }
-    st.title("Login Konversi Faktur Pajak")
+    st.title("Login Convert PDF FP To Excel")
     username = st.text_input("Username", placeholder="Masukkan username Anda")
     password = st.text_input("Password", type="password", placeholder="Masukkan password Anda")
     
@@ -97,12 +97,12 @@ def login_page():
         if username in users and hashlib.sha256(password.encode()).hexdigest() == users[username]:
             st.session_state["logged_in"] = True
             st.session_state["username"] = username
-            st.success("Login berhasil!")
+            st.success("Login berhasil! Selamat Datang Member ijfugroup")
         else:
             st.error("Username atau password salah")
 
 def main_app():
-    st.title("Konversi Faktur Pajak PDF To Excel")
+    st.title("Convert Faktur Pajak PDF To Excel")
     uploaded_files = st.file_uploader("Upload Faktur Pajak (PDF, bisa lebih dari satu)", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_files:
