@@ -117,7 +117,7 @@ if st.button("Login"):
         st.session_state["logged_in"] = True
         st.session_state["username"] = username  # Simpan username di session state
         st.success("Login berhasil!")
-        st.experimental_rerun()  # Gunakan rerun untuk memastikan perubahan halaman
+        st.session_state["logged_in"] = True  # Set session state to logged in
     else:
         st.error("Username atau password salah")
 
@@ -130,7 +130,7 @@ def main_app():
         if st.button("Logout"):
             st.session_state["logged_in"] = False
             st.session_state["username"] = None
-            st.experimental_rerun()  # Logout dan rerun untuk menampilkan halaman login
+            st.experimental_rerun()  # Reload the app after logout
     
     uploaded_files = st.file_uploader("Upload Faktur Pajak (PDF, bisa lebih dari satu)", type=["pdf"], accept_multiple_files=True)
     
