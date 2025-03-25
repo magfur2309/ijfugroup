@@ -14,26 +14,16 @@ def find_invoice_date(pdf_file):
         for page in pdf.pages:
             text = page.extract_text()
             if text:
-                date_match = re.search(r'(\d{1,2})\s*(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s*(\d{4})', text, re.IGNORECASE)
+                date_match = re.search(r'\b(\d{1,2})\s*(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s*(\d{4})\b', text, re.IGNORECASE)
                 if date_match:
                     day, month, year = date_match.groups()
                     return f"{day.zfill(2)}/{month_map[month]}/{year}"
     return "Tidak ditemukan"
 
-def count_items_in_pdf(pdf_file):
-    item_count = 0
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                matches = re.findall(r'^(\d{1,3})\s+000000', text, re.MULTILINE)
-                item_count += len(matches)
-    return item_count
-
-def extract_data_from_pdf(pdf_file, tanggal_faktur, expected_item_count):
+def extract_data_from_pdf(pdf_file, tanggal_faktur):
     data = []
     no_fp, nama_penjual, nama_pembeli = None, None, None
-    item_counter = 0
+    previous_item = None  # Menyimpan item dari baris sebelumnya
     
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
@@ -47,7 +37,7 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur, expected_item_count):
                 if penjual_match:
                     nama_penjual = penjual_match.group(1).strip()
                 
-                pembeli_match = re.search(r'Pembeli Barang Kena Pajak/Penerima Jasa Kena Pajak:\s*Nama\s*:\s*([\w\s\-.,&()]+)\nAlamat', text)
+                pembeli_match = re.search(r'Pembeli.*?:\s*Nama\s*:\s*([\w\s\-.,&()]+)\nAlamat', text)
                 if pembeli_match:
                     nama_pembeli = pembeli_match.group(1).strip()
                     nama_pembeli = re.sub(r'\bAlamat\b', '', nama_pembeli, flags=re.IGNORECASE).strip()
@@ -55,62 +45,53 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur, expected_item_count):
             table = page.extract_table()
             if table:
                 for row in table:
-                    if len(row) >= 4 and row[0].isdigit():
-                        nama_barang = " ".join(row[2].split("\n")).strip()
-                        
-                        # **Hapus informasi harga dan potongan dari nama barang**
-                        nama_barang = re.sub(r'Rp [\d.,]+ x [\d.,]+ \w+', '', nama_barang)  # Hapus harga & jumlah
-                        nama_barang = re.sub(r'Potongan Harga\s*=\s*Rp\s*[\d.,]+', '', nama_barang)  # Hapus potongan harga
-                        nama_barang = re.sub(r'PPnBM\s*\([\d.,]+%\)\s*=\s*Rp\s*[\d.,]+', '', nama_barang)  # Hapus PPnBM
-                        nama_barang = nama_barang.strip()  # Bersihkan spasi ekstra
+                    if row and row[0] and re.match(r'^\d+$', row[0]):
+                        # Periksa apakah nama barang terpotong
+                        nama_barang = re.sub(r'Rp [\d.,]+ x [\d.,]+ \w+.*', '', row[2]).strip()
+                        nama_barang = re.sub(r'Potongan Harga = Rp [\d.,]+', '', nama_barang).strip()
+                        nama_barang = re.sub(r'PPnBM \(\d+,?\d*%\) = Rp [\d.,]+', '', nama_barang).strip()
+                        nama_barang = re.sub(r'Tanggal:\s*\d{2}/\d{2}/\d{4}', '', nama_barang).strip()
+
+                        if not nama_barang:  # Jika nama barang kosong, gunakan nama barang dari baris sebelumnya
+                            nama_barang = previous_item
 
                         harga_qty_info = re.search(r'Rp ([\d.,]+) x ([\d.,]+) (\w+)', row[2])
                         if harga_qty_info:
-                            harga = int(float(harga_qty_info.group(1).replace('.', '').replace(',', '.')))
-                            qty = int(float(harga_qty_info.group(2).replace('.', '').replace(',', '.')))
+                            harga = float(harga_qty_info.group(1).replace('.', '').replace(',', '.'))
+                            qty = float(harga_qty_info.group(2).replace('.', '').replace(',', '.'))
                             unit = harga_qty_info.group(3)
                         else:
-                            harga, qty, unit = 0, 0, "Unknown"
+                            harga, qty, unit = 0.0, 0.0, "Unknown"
                         
-                        potongan_harga_match = re.search(r'Potongan Harga\s*=\s*Rp\s*([\d.,]+)', row[2])
-                        potongan_harga = int(float(potongan_harga_match.group(1).replace('.', '').replace(',', '.'))) if potongan_harga_match else 0
+                        total = harga * qty
+                        dpp = round(total * 11 / 12, 2)  # Perubahan rumus DPP
+                        ppn = round(dpp * 0.12, 2)  # Perubahan rumus PPN
+                        data.append([no_fp or "Tidak ditemukan", nama_penjual or "Tidak ditemukan", nama_pembeli or "Tidak ditemukan", tanggal_faktur, nama_barang, qty, unit, harga, total, dpp, ppn])
                         
-                        total = (harga * qty) - potongan_harga
-                        potongan_harga = min(potongan_harga, total)
-                        ppn = round(total * 0.11, 2)
-                        dpp = total - ppn
-                        item = [no_fp or "Tidak ditemukan", nama_penjual or "Tidak ditemukan", nama_pembeli or "Tidak ditemukan", tanggal_faktur, nama_barang, qty, unit, harga, potongan_harga, total, dpp, ppn]
-                        data.append(item)
-                        item_counter += 1
-                        
-                        if item_counter >= expected_item_count:
-                            break  
+                        previous_item = nama_barang  # Simpan nama barang untuk baris berikutnya
     return data
+
 
 
 def login_page():
     users = {
         "user1": hashlib.sha256("ijfugroup1".encode()).hexdigest(),
-        "user2": hashlib.sha256("ijfugroup2".encode()).hexdigest(),
-        "user3": hashlib.sha256("ijfugroup3".encode()).hexdigest(),
-        "user4": hashlib.sha256("ijfugroup4".encode()).hexdigest()
+        "user2": hashlib.sha256("ijfugroup2".encode()).hexdigest()
     }
     
     st.title("Login Convert PDF FP To Excel")
-
+    
     with st.form("login_form"):
         username = st.text_input("Username", placeholder="Masukkan username Anda")
         password = st.text_input("Password", type="password", placeholder="Masukkan password Anda")
         submit_button = st.form_submit_button("Login")
-
+    
     if submit_button:
         if username in users and hashlib.sha256(password.encode()).hexdigest() == users[username]:
             st.session_state["logged_in"] = True
-            st.session_state["username"] = username
-            st.success("Login berhasil! Selamat Datang Member ijfugroup")
+            st.success("Login berhasil! Selamat Datang")
         else:
             st.error("Username atau password salah")
-
 
 def main_app():
     st.title("Convert Faktur Pajak PDF To Excel")
@@ -120,21 +101,16 @@ def main_app():
         all_data = []
         for uploaded_file in uploaded_files:
             tanggal_faktur = find_invoice_date(uploaded_file)
-            detected_item_count = count_items_in_pdf(uploaded_file)
-            extracted_data = extract_data_from_pdf(uploaded_file, tanggal_faktur, detected_item_count)
-            extracted_item_count = len(extracted_data)
-            
-            if detected_item_count != extracted_item_count and detected_item_count != 0:
-                st.warning(f"Jumlah item tidak cocok untuk {uploaded_file.name}: Ditemukan {detected_item_count}, diekstrak {extracted_item_count}")
-            
-            if extracted_data:
-                all_data.extend(extracted_data)
+            extracted_data = extract_data_from_pdf(uploaded_file, tanggal_faktur)
+            all_data.extend(extracted_data)
         
         if all_data:
-            df = pd.DataFrame(all_data, columns=["No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur", "Nama Barang", "Qty", "Satuan", "Harga", "Potongan Harga", "Total", "DPP", "PPN"])
-            df.index = df.index + 1  
+            df = pd.DataFrame(all_data, columns=["No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur", "Nama Barang", "Qty", "Satuan", "Harga", "Total", "DPP", "PPN"])
+            df.index += 1  
+            
             st.write("### Pratinjau Data yang Diekstrak")
             st.dataframe(df)
+            
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=True, sheet_name='Faktur Pajak')
