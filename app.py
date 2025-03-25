@@ -46,16 +46,17 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur):
             if table:
                 for row in table:
                     if row and row[0] and re.match(r'^\d+$', row[0]):
-                        # Periksa apakah nama barang terpotong
                         nama_barang = re.sub(r'Rp [\d.,]+ x [\d.,]+ \w+.*', '', row[2]).strip()
                         nama_barang = re.sub(r'Potongan Harga = Rp [\d.,]+', '', nama_barang).strip()
                         nama_barang = re.sub(r'PPnBM \(\d+,?\d*%\) = Rp [\d.,]+', '', nama_barang).strip()
                         nama_barang = re.sub(r'Tanggal:\s*\d{2}/\d{2}/\d{4}', '', nama_barang).strip()
 
-                        if not nama_barang:  # Jika nama barang kosong, gunakan nama barang dari baris sebelumnya
+                        if not nama_barang:
                             nama_barang = previous_item
 
                         harga_qty_info = re.search(r'Rp ([\d.,]+) x ([\d.,]+) (\w+)', row[2])
+                        potongan_match = re.search(r'Potongan Harga = Rp ([\d.,]+)', row[2])
+
                         if harga_qty_info:
                             harga = float(harga_qty_info.group(1).replace('.', '').replace(',', '.'))
                             qty = float(harga_qty_info.group(2).replace('.', '').replace(',', '.'))
@@ -63,15 +64,29 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur):
                         else:
                             harga, qty, unit = 0.0, 0.0, "Unknown"
                         
-                        total = harga * qty
-                        dpp = round(total * 11 / 12, 2)  # Perubahan rumus DPP
-                        ppn = round(dpp * 0.12, 2)  # Perubahan rumus PPN
-                        data.append([no_fp or "Tidak ditemukan", nama_penjual or "Tidak ditemukan", nama_pembeli or "Tidak ditemukan", tanggal_faktur, nama_barang, qty, unit, harga, total, dpp, ppn])
+                        potongan = float(potongan_match.group(1).replace('.', '').replace(',', '.')) if potongan_match else 0.0
+
+                        total = (harga * qty) - potongan
+                        dpp = round(total * 11 / 12, 2)
+                        ppn = round(dpp * 0.12, 2)
+
+                        data.append([
+                            no_fp or "Tidak ditemukan",
+                            nama_penjual or "Tidak ditemukan",
+                            nama_pembeli or "Tidak ditemukan",
+                            tanggal_faktur,
+                            nama_barang,
+                            qty,
+                            unit,
+                            harga,
+                            potongan,  # Menambahkan kolom Potongan
+                            total,
+                            dpp,
+                            ppn
+                        ])
                         
-                        previous_item = nama_barang  # Simpan nama barang untuk baris berikutnya
+                        previous_item = nama_barang  
     return data
-
-
 
 def login_page():
     users = {
@@ -105,7 +120,7 @@ def main_app():
             all_data.extend(extracted_data)
         
         if all_data:
-            df = pd.DataFrame(all_data, columns=["No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur", "Nama Barang", "Qty", "Satuan", "Harga", "Total", "DPP", "PPN"])
+            df = pd.DataFrame(all_data, columns=["No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur", "Nama Barang", "Qty", "Satuan", "Harga", "Potongan", "Total", "DPP", "PPN"])
             df.index += 1  
             
             st.write("### Pratinjau Data yang Diekstrak")
