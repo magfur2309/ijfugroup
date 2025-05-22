@@ -92,8 +92,7 @@ def login_page():
     users = {
         "user1": hashlib.sha256("ijfugroup1".encode()).hexdigest(),
         "user2": hashlib.sha256("ijfugroup2".encode()).hexdigest()
-         "user3": hashlib.sha256("ijfugroup2".encode()).hexdigest()
-     "user4": hashlib.sha256("ijfugroup2".encode()).hexdigest()
+        
     }
     
     st.title("Login Convert PDF FP To Excel")
