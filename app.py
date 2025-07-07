@@ -111,7 +111,6 @@ def login_page():
             st.success("Login berhasil! Selamat Datang")
         else:
             st.error("Username atau password salah")
-
 def main_app():
     st.title("Convert Faktur Pajak PDF To Excel")
 
@@ -119,15 +118,11 @@ def main_app():
         st.session_state["logged_in"] = False
         st.experimental_rerun()
 
-    # Inisialisasi reset state
-    if "reset_state" not in st.session_state:
-        st.session_state["reset_state"] = False
+    # Tombol reset hanya muncul setelah upload dan konversi
+    if "uploaded" not in st.session_state:
+        st.session_state["uploaded"] = False
 
-    # Jalankan ulang jika tombol Reset ditekan
-    if st.session_state["reset_state"]:
-        st.session_state["reset_state"] = False
-        st.experimental_rerun()
-
+    # File uploader
     uploaded_files = st.file_uploader(
         "Upload Faktur Pajak (PDF, bisa lebih dari satu)",
         type=["pdf"],
@@ -135,7 +130,7 @@ def main_app():
         key="file_uploader"
     )
 
-    if uploaded_files:
+    if uploaded_files and not st.session_state["uploaded"]:
         all_data = []
         for uploaded_file in uploaded_files:
             tanggal_faktur = find_invoice_date(uploaded_file)
@@ -168,7 +163,14 @@ def main_app():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-            # Tombol Reset
-            if st.button("🔄 Reset & Mulai Lagi"):
-                st.session_state["reset_state"] = True
-                st.experimental_rerun()
+            # Tampilkan tombol reset
+            st.session_state["uploaded"] = True
+
+    # Tombol Reset
+    if st.session_state["uploaded"]:
+        if st.button("🔄 Reset & Mulai Lagi"):
+            for key in ["file_uploader", "uploaded"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.experimental_rerun()
+
