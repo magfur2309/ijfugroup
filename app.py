@@ -5,9 +5,9 @@ import io
 import re
 import hashlib
 
-# ================================
-# Fungsi: Temukan Tanggal Faktur
-# ================================
+# ========================
+# Fungsi: Temukan Tanggal
+# ========================
 def find_invoice_date(pdf_file):
     month_map = {
         "Januari": "01", "Februari": "02", "Maret": "03", "April": "04", "Mei": "05", "Juni": "06", 
@@ -17,15 +17,15 @@ def find_invoice_date(pdf_file):
         for page in pdf.pages:
             text = page.extract_text()
             if text:
-                date_match = re.search(r'\b(\d{1,2})\s*(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s*(\d{4})\b', text, re.IGNORECASE)
-                if date_match:
-                    day, month, year = date_match.groups()
+                match = re.search(r'\b(\d{1,2})\s*(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s*(\d{4})\b', text, re.IGNORECASE)
+                if match:
+                    day, month, year = match.groups()
                     return f"{day.zfill(2)}/{month_map[month]}/{year}"
     return "Tidak ditemukan"
 
-# ================================
-# Fungsi: Ekstrak Data dari PDF
-# ================================
+# ========================
+# Fungsi: Ekstraksi PDF
+# ========================
 def extract_data_from_pdf(pdf_file, tanggal_faktur):
     data = []
     no_fp, nama_penjual, nama_pembeli = None, None, None
@@ -91,13 +91,12 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur):
                             dpp,
                             ppn
                         ])
-
                         previous_item = nama_barang
     return data
 
-# ================================
-# Fungsi: Login Page
-# ================================
+# ========================
+# Fungsi: Halaman Login
+# ========================
 def login_page():
     users = {
         "user1": hashlib.sha256("ijfugroup1".encode()).hexdigest(),
@@ -107,23 +106,22 @@ def login_page():
     }
 
     st.title("Login Convert PDF FP To Excel")
-
     with st.form("login_form"):
-        username = st.text_input("Username", placeholder="Masukkan username Anda")
-        password = st.text_input("Password", type="password", placeholder="Masukkan password Anda")
-        submit_button = st.form_submit_button("Login")
+        username = st.text_input("Username", placeholder="Masukkan username")
+        password = st.text_input("Password", type="password", placeholder="Masukkan password")
+        login_btn = st.form_submit_button("Login")
 
-    if submit_button:
+    if login_btn:
         if username in users and hashlib.sha256(password.encode()).hexdigest() == users[username]:
             st.session_state["logged_in"] = True
-            st.success("Login berhasil! Selamat datang")
-            st.experimental_rerun()
+            st.success("Login berhasil!")
+            st.rerun()
         else:
-            st.error("Username atau password salah")
+            st.error("Username atau password salah.")
 
-# ================================
-# Fungsi: Main App
-# ================================
+# ========================
+# Fungsi: Halaman Utama
+# ========================
 def main_app():
     st.title("Convert Faktur Pajak PDF To Excel")
 
@@ -136,32 +134,32 @@ def main_app():
         st.session_state["unduh_selesai"] = False
 
     if st.session_state["unduh_selesai"]:
-        st.success("File berhasil diunduh! Silakan upload faktur berikutnya.")
+        st.success("✅ File berhasil diunduh. Silakan upload faktur baru.")
         if st.button("🔁 Upload Data Baru"):
             st.session_state["unduh_selesai"] = False
             st.rerun()
         return
 
-    uploaded_files = st.file_uploader("Upload Faktur Pajak (PDF, bisa lebih dari satu)", type=["pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("📄 Upload Faktur Pajak (PDF, bisa lebih dari satu)", type=["pdf"], accept_multiple_files=True)
 
     if uploaded_files:
         all_data = []
-        for uploaded_file in uploaded_files:
+        for file in uploaded_files:
             try:
-                tanggal_faktur = find_invoice_date(uploaded_file)
-                extracted_data = extract_data_from_pdf(uploaded_file, tanggal_faktur)
-                all_data.extend(extracted_data)
+                tanggal = find_invoice_date(file)
+                data = extract_data_from_pdf(file, tanggal)
+                all_data.extend(data)
             except Exception as e:
-                st.error(f"Gagal memproses {uploaded_file.name}: {e}")
+                st.error(f"Gagal memproses {file.name}: {e}")
 
         if all_data:
             df = pd.DataFrame(all_data, columns=[
-                "No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur", 
+                "No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur",
                 "Nama Barang", "Qty", "Satuan", "Harga", "Potongan", "Total", "DPP", "PPN"
             ])
             df.index += 1
 
-            st.write("### Pratinjau Data yang Diekstrak")
+            st.write("### 🧾 Pratinjau Data")
             st.dataframe(df)
 
             output = io.BytesIO()
@@ -176,11 +174,11 @@ def main_app():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             ):
                 st.session_state["unduh_selesai"] = True
-                st.experimental_rerun()
+                st.rerun()
 
-# ================================
-# App Control
-# ================================
+# ========================
+# Kontrol Aplikasi
+# ========================
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
@@ -189,9 +187,9 @@ if not st.session_state["logged_in"]:
 else:
     main_app()
 
-# ================================
-# Tombol Reset Session (Debug)
-# ================================
-if st.sidebar.button("🧹 Reset Session (Dev Only)"):
+# ========================
+# Tombol Reset Debug
+# ========================
+if st.sidebar.button("🧹 Reset Session (Debug)"):
     st.session_state.clear()
     st.rerun()
