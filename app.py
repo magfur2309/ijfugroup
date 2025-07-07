@@ -113,37 +113,18 @@ def login_page():
 
 def main_app():
     st.title("Convert Faktur Pajak PDF To Excel")
-    
-    # Reset jika user belum klik "Unduh Excel"
-    if "unduh_selesai" not in st.session_state:
-        st.session_state["unduh_selesai"] = False
-    
-    # Jika sudah selesai diunduh, reset ke awal
-    if st.session_state["unduh_selesai"]:
-        st.success("File berhasil diunduh! Silakan upload faktur berikutnya.")
-        if st.button("🔁 Upload Data Baru"):
-            st.session_state["unduh_selesai"] = False
-            st.rerun()
-        return  # Keluar dari main_app agar tidak muncul ulang upload lama
-
     uploaded_files = st.file_uploader("Upload Faktur Pajak (PDF, bisa lebih dari satu)", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_files:
         all_data = []
         for uploaded_file in uploaded_files:
-            try:
-                tanggal_faktur = find_invoice_date(uploaded_file)
-                extracted_data = extract_data_from_pdf(uploaded_file, tanggal_faktur)
-                all_data.extend(extracted_data)
-            except Exception as e:
-                st.error(f"Gagal memproses {uploaded_file.name}: {e}")
-
+            tanggal_faktur = find_invoice_date(uploaded_file)
+            extracted_data = extract_data_from_pdf(uploaded_file, tanggal_faktur)
+            all_data.extend(extracted_data)
+        
         if all_data:
-            df = pd.DataFrame(all_data, columns=[
-                "No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur", 
-                "Nama Barang", "Qty", "Satuan", "Harga", "Potongan", "Total", "DPP", "PPN"
-            ])
-            df.index += 1
+            df = pd.DataFrame(all_data, columns=["No FP", "Nama Penjual", "Nama Pembeli", "Tanggal Faktur", "Nama Barang", "Qty", "Satuan", "Harga", "Potongan", "Total", "DPP", "PPN"])
+            df.index += 1  
             
             st.write("### Pratinjau Data yang Diekstrak")
             st.dataframe(df)
@@ -152,13 +133,12 @@ def main_app():
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=True, sheet_name='Faktur Pajak')
             output.seek(0)
-            
-            # Tombol unduh dan aksi setelahnya
-            if st.download_button(
-                label="\U0001F4E5 Unduh Excel",
-                data=output,
-                file_name="Faktur_Pajak.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ):
-                st.session_state["unduh_selesai"] = True
-                st.experimental_rerun()
+            st.download_button(label="\U0001F4E5 Unduh Excel", data=output, file_name="Faktur_Pajak.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_page()
+else:
+    main_app()
