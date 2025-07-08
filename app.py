@@ -24,70 +24,76 @@ def find_invoice_date(pdf_file):
     return "Tidak ditemukan"
 
 # ========================
-# Fungsi: Ekstraksi PDF (dengan Laporan Kegagalan)
+# Fungsi: Ekstraksi PDF
 # ========================
 def extract_data_from_pdf(pdf_file, tanggal_faktur):
     data = []
-    failed_blocks = [] # Daftar untuk menyimpan data yang gagal
     no_fp, nama_penjual, nama_pembeli = None, None, None
-
-    with pdfplumber.open(pdf_file) as pdf:
-        first_page_text = pdf.pages[0].extract_text() if pdf.pages else ""
-        if first_page_text:
-            no_fp_match = re.search(r'Kode dan Nomor Seri Faktur Pajak\s*:\s*([\d\.\-]+)', first_page_text)
-            if no_fp_match: no_fp = no_fp_match.group(1)
-            penjual_match = re.search(r'Nama\s*:\s*(SOFIE FASHION INDONESIA)', first_page_text, re.DOTALL)
-            if penjual_match: nama_penjual = penjual_match.group(1).strip()
-            pembeli_match = re.search(r'Pembeli.*?Nama\s*:\s*(.+?)\s*Alamat', first_page_text, re.DOTALL)
-            if pembeli_match:
-                nama_pembeli = pembeli_match.group(1).strip()
-                nama_pembeli = re.sub(r'\bAlamat\b', '', nama_pembeli, flags=re.IGNORECASE).strip()
-
-        all_rows = []
-        for page in pdf.pages:
-            table = page.extract_table(table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"})
-            if table: all_rows.extend(table)
-        
-        item_blocks, current_block = [], []
-        for row in all_rows:
-            if not row or not any(cell and str(cell).strip() for cell in row): continue
-            item_no_match = re.match(r'^\s*(\d+)', str(row[0]).strip())
-            is_likely_item_start = item_no_match and (not row[1] or str(row[1]).strip().isdigit())
-            if is_likely_item_start:
-                if current_block: item_blocks.append(current_block)
-                current_block = [row]
-            else:
-                if current_block: current_block.append(row)
-        if current_block: item_blocks.append(current_block)
-            
-        for block in item_blocks:
-            block_text = " ".join(" ".join(filter(None, [str(c).strip().replace('\n', ' ') for c in r])) for r in block)
-            harga_qty_match = re.search(r'Rp\s*~?\$?p?\s*([\d.,]+)\s*x\s*([\d.,]+)\s*(\w+)', block_text, re.IGNORECASE)
-
-            if harga_qty_match:
-                # Proses data yang berhasil...
-                nama_barang = re.sub(r'Rp\s*~?\$?p?\s*([\d.,]+).*', '', block_text, flags=re.IGNORECASE)
-                nama_barang = re.sub(r'^\d+\s*[\d\w-]*\s*', '', nama_barang)
-                nama_barang = re.sub(r'Potongan Harga.*|PPnBM.*', '', nama_barang, flags=re.DOTALL)
-                nama_barang = ' '.join(nama_barang.split())
-                harga = float(harga_qty_match.group(1).replace('.', '').replace(',', '.'))
-                qty = float(harga_qty_match.group(2).replace('.', '').replace(',', '.'))
-                unit = harga_qty_match.group(3)
-                potongan_match = re.search(r'Potongan Harga\s*=\s*Rp\s*([\d.,]+)', block_text)
-                potongan = float(potongan_match.group(1).replace('.', '').replace(',', '.')) if potongan_match else 0.0
-                total = (harga * qty) - potongan
-                dpp = total / 1.11
-                ppn = total - dpp
-                data.append([
-                    no_fp or "Tidak ditemukan", nama_penjual or "Tidak ditemukan", nama_pembeli or "Tidak ditemukan",
-                    tanggal_faktur, nama_barang, qty, unit, harga, potongan, total, round(dpp, 2), round(ppn, 2)
-                ])
-            else:
-                # Jika tidak ditemukan pola harga, anggap gagal dan simpan teksnya
-                failed_blocks.append(block_text)
-
-    return data, failed_blocks
+    previous_item = None
     
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                no_fp_match = re.search(r'Kode dan Nomor Seri Faktur Pajak\s*:\s*([\d\.\-]+)', text)
+                if no_fp_match:
+                    no_fp = no_fp_match.group(1)
+
+                penjual_match = re.search(r'Nama\s*:\s*(.+?)\s*Alamat', text, re.DOTALL)
+                if penjual_match:
+                    nama_penjual = penjual_match.group(1).strip()
+
+                pembeli_match = re.search(r'Pembeli.*?:\s*Nama\s*:\s*(.+?)\s*Alamat', text, re.DOTALL)
+                if pembeli_match:
+                    nama_pembeli = pembeli_match.group(1).strip()
+                    nama_pembeli = re.sub(r'\bAlamat\b', '', nama_pembeli, flags=re.IGNORECASE).strip()
+
+            table = page.extract_table()
+            if table:
+                for row in table:
+                    if row and row[0] and re.match(r'^\d+$', row[0]):
+                        nama_barang = re.sub(r'Rp [\d.,]+ x [\d.,]+ \w+.*', '', row[2]).strip()
+                        nama_barang = re.sub(r'Potongan Harga = Rp [\d.,]+', '', nama_barang).strip()
+                        nama_barang = re.sub(r'PPnBM \(\d+,?\d*%\) = Rp [\d.,]+', '', nama_barang).strip()
+                        nama_barang = re.sub(r'Tanggal:\s*\d{2}/\d{2}/\d{4}', '', nama_barang).strip()
+                        if not nama_barang and row[2]:
+                            nama_barang = row[2].strip()
+                        if not nama_barang:
+                            nama_barang = previous_item
+
+                        harga_qty_info = re.search(r'Rp ([\d.,]+) x ([\d.,]+) (\w+)', row[2])
+                        potongan_match = re.search(r'Potongan Harga = Rp ([\d.,]+)', row[2])
+
+                        if harga_qty_info:
+                            harga = float(harga_qty_info.group(1).replace('.', '').replace(',', '.'))
+                            qty = float(harga_qty_info.group(2).replace('.', '').replace(',', '.'))
+                            unit = harga_qty_info.group(3)
+                        else:
+                            harga, qty, unit = 0.0, 0.0, "Unknown"
+
+                        potongan = float(potongan_match.group(1).replace('.', '').replace(',', '.')) if potongan_match else 0.0
+
+                        total = (harga * qty) - potongan
+                        dpp = round(total * 11 / 12, 2)
+                        ppn = round(dpp * 0.12, 2)
+
+                        data.append([
+                            no_fp or "Tidak ditemukan",
+                            nama_penjual or "Tidak ditemukan",
+                            nama_pembeli or "Tidak ditemukan",
+                            tanggal_faktur,
+                            nama_barang,
+                            qty,
+                            unit,
+                            harga,
+                            potongan,
+                            total,
+                            dpp,
+                            ppn
+                        ])
+                        previous_item = nama_barang
+    return data
+
 # ========================
 # Fungsi: Halaman Login
 # ========================
@@ -114,7 +120,7 @@ def login_page():
             st.error("Username atau password salah.")
 
 # ========================
-# Fungsi: Halaman Utama (dengan Notifikasi Kegagalan)
+# Fungsi: Halaman Utama
 # ========================
 def main_app():
     st.title("Convert Faktur Pajak PDF To Excel")
@@ -138,25 +144,13 @@ def main_app():
 
     if uploaded_files:
         all_data = []
-        all_failed_blocks = []
         for file in uploaded_files:
             try:
                 tanggal = find_invoice_date(file)
-                # Terima dua nilai kembalian dari fungsi
-                data, failed_blocks = extract_data_from_pdf(file, tanggal)
-                if data:
-                    all_data.extend(data)
-                if failed_blocks:
-                    all_failed_blocks.extend(failed_blocks)
+                data = extract_data_from_pdf(file, tanggal)
+                all_data.extend(data)
             except Exception as e:
                 st.error(f"Gagal memproses {file.name}: {e}")
-
-        # Tampilkan notifikasi jika ada data yang gagal
-        if all_failed_blocks:
-            st.warning("⚠️ Beberapa data item tidak dapat dibaca dan kemungkinan terlewat.")
-            with st.expander("Klik untuk melihat detail data yang gagal dibaca"):
-                for i, block_text in enumerate(all_failed_blocks):
-                    st.text_area(f"Data Gagal #{i+1}", block_text, height=100, key=f"failed_{i}")
 
         if all_data:
             df = pd.DataFrame(all_data, columns=[
@@ -164,7 +158,8 @@ def main_app():
                 "Nama Barang", "Qty", "Satuan", "Harga", "Potongan", "Total", "DPP", "PPN"
             ])
             df.index += 1
-            st.write("### 🧾 Pratinjau Data Berhasil")
+
+            st.write("### 🧾 Pratinjau Data")
             st.dataframe(df)
 
             output = io.BytesIO()
@@ -180,8 +175,17 @@ def main_app():
             ):
                 st.session_state["unduh_selesai"] = True
                 st.rerun()
-        elif not all_failed_blocks:
-            st.info("Tidak ada data yang dapat diekstrak dari file yang diunggah.")
+
+# ========================
+# Kontrol Aplikasi
+# ========================
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_page()
+else:
+    main_app()
 
 # ========================
 # Tombol Reset Debug
