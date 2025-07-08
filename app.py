@@ -24,14 +24,14 @@ def find_invoice_date(pdf_file):
     return "Tidak ditemukan"
 
 # ========================
-# Fungsi: Ekstraksi PDF (Final & Lebih Andal)
+# Fungsi: Ekstraksi PDF (Perbaikan Final untuk Deteksi Item)
 # ========================
 def extract_data_from_pdf(pdf_file, tanggal_faktur):
     data = []
     no_fp, nama_penjual, nama_pembeli = None, None, None
 
     with pdfplumber.open(pdf_file) as pdf:
-        # Step 1: Ekstrak info header dari halaman pertama saja untuk efisiensi
+        # Step 1: Ekstrak info header dari halaman pertama
         first_page_text = pdf.pages[0].extract_text() if pdf.pages else ""
         if first_page_text:
             no_fp_match = re.search(r'Kode dan Nomor Seri Faktur Pajak\s*:\s*([\d\.\-]+)', first_page_text)
@@ -45,10 +45,10 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur):
                 nama_pembeli = pembeli_match.group(1).strip()
                 nama_pembeli = re.sub(r'\bAlamat\b', '', nama_pembeli, flags=re.IGNORECASE).strip()
 
-        # Step 2: Kumpulkan semua baris dari semua tabel menjadi satu daftar
+        # Step 2: Kumpulkan semua baris dari semua tabel
         all_rows = []
         for page in pdf.pages:
-            table = page.extract_table()
+            table = page.extract_table(table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"})
             if table:
                 all_rows.extend(table)
         
@@ -59,33 +59,35 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur):
             if not row or not any(cell and str(cell).strip() for cell in row):
                 continue
             
-            # Cek apakah baris ini memulai item baru (ada nomor di kolom pertama)
-            item_no_match = re.match(r'^\s*(\d+)\s*$', str(row[0]).strip())
+            # Regex yang sedikit lebih fleksibel untuk mendeteksi nomor item
+            # Ini akan mencari angka di awal string, bahkan jika ada teks lain setelahnya
+            item_no_match = re.match(r'^\s*(\d+)', str(row[0]).strip())
             
-            if item_no_match:
-                if current_block: # Simpan blok sebelumnya jika ada
+            # Kondisi tambahan: pastikan kolom kedua adalah kode barang (angka) atau kosong
+            is_likely_item_start = item_no_match and (not row[1] or str(row[1]).strip().isdigit())
+
+            if is_likely_item_start:
+                if current_block:
                     item_blocks.append(current_block)
-                current_block = [row] # Mulai blok baru
+                current_block = [row]
             else:
-                if current_block: # Lanjutkan blok yang ada
+                if current_block:
                     current_block.append(row)
         
-        if current_block: # Jangan lupa simpan blok terakhir
+        if current_block:
             item_blocks.append(current_block)
             
-        # Step 4: Proses setiap blok item secara terpisah
+        # Step 4: Proses setiap blok item
         for block in item_blocks:
-            # Gabungkan semua teks dalam satu blok menjadi satu string besar
             block_text = " ".join(" ".join(filter(None, [str(c).strip().replace('\n', ' ') for c in r])) for r in block)
             
             harga_qty_match = re.search(r'Rp\s*~?\$?p?\s*([\d.,]+)\s*x\s*([\d.,]+)\s*(\w+)', block_text, re.IGNORECASE)
 
             if harga_qty_match:
-                # Ekstrak nama barang dengan membersihkan semua info lain dari blok teks
                 nama_barang = re.sub(r'Rp\s*~?\$?p?\s*([\d.,]+).*', '', block_text, flags=re.IGNORECASE)
-                nama_barang = re.sub(r'^\d+\s*[\d\w-]*\s*', '', nama_barang) # Hapus nomor item dan kode
+                nama_barang = re.sub(r'^\d+\s*[\d\w-]*\s*', '', nama_barang)
                 nama_barang = re.sub(r'Potongan Harga.*|PPnBM.*', '', nama_barang, flags=re.DOTALL)
-                nama_barang = ' '.join(nama_barang.split()) # Normalisasi spasi
+                nama_barang = ' '.join(nama_barang.split())
 
                 harga = float(harga_qty_match.group(1).replace('.', '').replace(',', '.'))
                 qty = float(harga_qty_match.group(2).replace('.', '').replace(',', '.'))
@@ -95,7 +97,7 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur):
                 potongan = float(potongan_match.group(1).replace('.', '').replace(',', '.')) if potongan_match else 0.0
                 
                 total = (harga * qty) - potongan
-                dpp = total / 1.11 # Asumsi PPN 11%
+                dpp = total / 1.11
                 ppn = total - dpp
 
                 data.append([
