@@ -6,6 +6,24 @@ import re
 import hashlib
 
 # ========================
+# Fungsi: Temukan Tanggal
+# ========================
+def find_invoice_date(pdf_file):
+    month_map = {
+        "Januari": "01", "Februari": "02", "Maret": "03", "April": "04", "Mei": "05", "Juni": "06", 
+        "Juli": "07", "Agustus": "08", "September": "09", "Oktober": "10", "November": "11", "Desember": "12"
+    }
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                match = re.search(r'\b(\d{1,2})\s*(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s*(\d{4})\b', text, re.IGNORECASE)
+                if match:
+                    day, month, year = match.groups()
+                    return f"{day.zfill(2)}/{month_map[month]}/{year}"
+    return "Tidak ditemukan"
+
+# ========================
 # Fungsi: Ekstraksi PDF (Final & Lebih Andal)
 # ========================
 def extract_data_from_pdf(pdf_file, tanggal_faktur):
