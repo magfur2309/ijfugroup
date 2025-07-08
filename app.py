@@ -96,6 +96,7 @@ def extract_data_from_pdf(pdf_file, tanggal_faktur):
                 ])
 
     return data
+    
 # ========================
 # Fungsi: Halaman Login
 # ========================
