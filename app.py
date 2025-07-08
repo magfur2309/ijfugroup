@@ -6,112 +6,96 @@ import re
 import hashlib
 
 # ========================
-# Fungsi: Temukan Tanggal
-# ========================
-def find_invoice_date(pdf_file):
-    month_map = {
-        "Januari": "01", "Februari": "02", "Maret": "03", "April": "04", "Mei": "05", "Juni": "06", 
-        "Juli": "07", "Agustus": "08", "September": "09", "Oktober": "10", "November": "11", "Desember": "12"
-    }
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                match = re.search(r'\b(\d{1,2})\s*(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s*(\d{4})\b', text, re.IGNORECASE)
-                if match:
-                    day, month, year = match.groups()
-                    return f"{day.zfill(2)}/{month_map[month]}/{year}"
-    return "Tidak ditemukan"
-
-# ========================
-# Fungsi: Ekstraksi PDF
+# Fungsi: Ekstraksi PDF (Final & Lebih Andal)
 # ========================
 def extract_data_from_pdf(pdf_file, tanggal_faktur):
     data = []
     no_fp, nama_penjual, nama_pembeli = None, None, None
-    pending_item_name = ""
 
     with pdfplumber.open(pdf_file) as pdf:
+        # Step 1: Ekstrak info header dari halaman pertama saja untuk efisiensi
+        first_page_text = pdf.pages[0].extract_text() if pdf.pages else ""
+        if first_page_text:
+            no_fp_match = re.search(r'Kode dan Nomor Seri Faktur Pajak\s*:\s*([\d\.\-]+)', first_page_text)
+            if no_fp_match: no_fp = no_fp_match.group(1)
+
+            penjual_match = re.search(r'Nama\s*:\s*(SOFIE FASHION INDONESIA)', first_page_text, re.DOTALL)
+            if penjual_match: nama_penjual = penjual_match.group(1).strip()
+
+            pembeli_match = re.search(r'Pembeli.*?Nama\s*:\s*(.+?)\s*Alamat', first_page_text, re.DOTALL)
+            if pembeli_match:
+                nama_pembeli = pembeli_match.group(1).strip()
+                nama_pembeli = re.sub(r'\bAlamat\b', '', nama_pembeli, flags=re.IGNORECASE).strip()
+
+        # Step 2: Kumpulkan semua baris dari semua tabel menjadi satu daftar
+        all_rows = []
         for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                if not no_fp:
-                    no_fp_match = re.search(r'Kode dan Nomor Seri Faktur Pajak\s*:\s*([\d\.\-]+)', text)
-                    if no_fp_match:
-                        no_fp = no_fp_match.group(1)
-
-                if not nama_penjual:
-                    penjual_match = re.search(r'Nama\s*:\s*(SOFIE FASHION INDONESIA)', text, re.DOTALL)
-                    if penjual_match:
-                        nama_penjual = penjual_match.group(1).strip()
-
-                if not nama_pembeli:
-                    pembeli_match = re.search(r'Pembeli.*?Nama\s*:\s*(.+?)\s*Alamat', text, re.DOTALL)
-                    if pembeli_match:
-                        nama_pembeli = pembeli_match.group(1).strip()
-                        nama_pembeli = re.sub(r'\bAlamat\b', '', nama_pembeli, flags=re.IGNORECASE).strip()
-
             table = page.extract_table()
             if table:
-                for row in table:
-                    if not row or not any(cell for cell in row if cell and cell.strip()):
-                        continue
-                    
-                    row_text = " ".join(filter(None, [str(c).strip() for c in row]))
-                    
-                    # Regex untuk mencari pola harga x kuantitas
-                    harga_qty_match = re.search(r'Rp\s*~?\$?p?\s*([\d.,]+)\s*x\s*([\d.,]+)\s*(\w+)', row_text, re.IGNORECASE)
+                all_rows.extend(table)
+        
+        # Step 3: Kelompokkan baris ke dalam blok per item
+        item_blocks = []
+        current_block = []
+        for row in all_rows:
+            if not row or not any(cell and str(cell).strip() for cell in row):
+                continue
+            
+            # Cek apakah baris ini memulai item baru (ada nomor di kolom pertama)
+            item_no_match = re.match(r'^\s*(\d+)\s*$', str(row[0]).strip())
+            
+            if item_no_match:
+                if current_block: # Simpan blok sebelumnya jika ada
+                    item_blocks.append(current_block)
+                current_block = [row] # Mulai blok baru
+            else:
+                if current_block: # Lanjutkan blok yang ada
+                    current_block.append(row)
+        
+        if current_block: # Jangan lupa simpan blok terakhir
+            item_blocks.append(current_block)
+            
+        # Step 4: Proses setiap blok item secara terpisah
+        for block in item_blocks:
+            # Gabungkan semua teks dalam satu blok menjadi satu string besar
+            block_text = " ".join(" ".join(filter(None, [str(c).strip().replace('\n', ' ') for c in r])) for r in block)
+            
+            harga_qty_match = re.search(r'Rp\s*~?\$?p?\s*([\d.,]+)\s*x\s*([\d.,]+)\s*(\w+)', block_text, re.IGNORECASE)
 
-                    if harga_qty_match:
-                        # Baris ini berisi harga, jadi kita proses sebagai item
-                        
-                        # Gabungkan nama yang tertunda dengan nama di baris saat ini
-                        current_name_part = re.sub(r'Rp\s*~?\$?p?\s*([\d.,]+).*', '', row_text, flags=re.IGNORECASE).strip()
-                        current_name_part = re.sub(r'^\d+\s*[\d\w-]*\s*', '', current_name_part).strip() # Hapus nomor dan kode barang
-                        
-                        full_item_name = (pending_item_name + " " + current_name_part).strip()
-                        
-                        # Bersihkan teks sisa
-                        full_item_name = re.sub(r'Potongan Harga.*|PPnBM.*', '', full_item_name, flags=re.DOTALL).strip()
-                        
-                        harga = float(harga_qty_match.group(1).replace('.', '').replace(',', '.'))
-                        qty = float(harga_qty_match.group(2).replace('.', '').replace(',', '.'))
-                        unit = harga_qty_match.group(3)
-                        
-                        potongan_match = re.search(r'Potongan Harga\s*=\s*Rp\s*([\d.,]+)', row_text)
-                        potongan = float(potongan_match.group(1).replace('.', '').replace(',', '.')) if potongan_match else 0.0
-                        
-                        # Ekstrak total langsung dari kolom terakhir jika ada, jika tidak, hitung
-                        total_str = row[-1].replace('.', '').replace(',', '.')
-                        total = float(total_str) if re.match(r'^\d+\.\d+$', total_str) else (harga * qty) - potongan
+            if harga_qty_match:
+                # Ekstrak nama barang dengan membersihkan semua info lain dari blok teks
+                nama_barang = re.sub(r'Rp\s*~?\$?p?\s*([\d.,]+).*', '', block_text, flags=re.IGNORECASE)
+                nama_barang = re.sub(r'^\d+\s*[\d\w-]*\s*', '', nama_barang) # Hapus nomor item dan kode
+                nama_barang = re.sub(r'Potongan Harga.*|PPnBM.*', '', nama_barang, flags=re.DOTALL)
+                nama_barang = ' '.join(nama_barang.split()) # Normalisasi spasi
 
-                        # Perhitungan DPP & PPN mungkin perlu disesuaikan dengan aturan pajak (misal 11%)
-                        # Berdasarkan file PDF: PPN adalah 11% dari DPP
-                        dpp = total / 1.11
-                        ppn = total - dpp
+                harga = float(harga_qty_match.group(1).replace('.', '').replace(',', '.'))
+                qty = float(harga_qty_match.group(2).replace('.', '').replace(',', '.'))
+                unit = harga_qty_match.group(3)
+                
+                potongan_match = re.search(r'Potongan Harga\s*=\s*Rp\s*([\d.,]+)', block_text)
+                potongan = float(potongan_match.group(1).replace('.', '').replace(',', '.')) if potongan_match else 0.0
+                
+                total = (harga * qty) - potongan
+                dpp = total / 1.11 # Asumsi PPN 11%
+                ppn = total - dpp
 
-                        data.append([
-                            no_fp or "Tidak ditemukan",
-                            nama_penjual or "Tidak ditemukan",
-                            nama_pembeli or "Tidak ditemukan",
-                            tanggal_faktur,
-                            full_item_name,
-                            qty,
-                            unit,
-                            harga,
-                            potongan,
-                            total,
-                            round(dpp, 2),
-                            round(ppn, 2)
-                        ])
-                        
-                        pending_item_name = "" # Reset setelah item diproses
+                data.append([
+                    no_fp or "Tidak ditemukan",
+                    nama_penjual or "Tidak ditemukan",
+                    nama_pembeli or "Tidak ditemukan",
+                    tanggal_faktur,
+                    nama_barang,
+                    qty,
+                    unit,
+                    harga,
+                    potongan,
+                    total,
+                    round(dpp, 2),
+                    round(ppn, 2)
+                ])
 
-                    elif row[2] and not re.match(r'^\d+$', str(row[0])):
-                        # Baris ini sepertinya hanya berisi nama barang, simpan untuk baris berikutnya
-                        pending_item_name += " " + str(row[2]).strip()
     return data
-
 # ========================
 # Fungsi: Halaman Login
 # ========================
